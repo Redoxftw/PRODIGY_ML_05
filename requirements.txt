@@ -1,0 +1,10 @@
+streamlit
+numpy
+opencv-python
+Pillow
+tensorflow
+keras
+matplotlib
+scikit-learn
+firebase-admin
+google-cloud-firestore

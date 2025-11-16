@@ -1,0 +1,26 @@
+# --- Virtual Environment ---
+# Ignore the entire 'venv' folder
+venv/
+
+# --- Streamlit Secrets ---
+# !! CRITICAL !!
+# Ignore the folder containing our secret key
+.streamlit/
+
+# --- Data ---
+# Ignore the entire 'data' folder (all train/test images)
+data/
+
+# --- Python Cache ---
+# Ignore the temporary files Python creates
+__pycache__/
+*.pyc
+
+# --- VS Code ---
+# Ignore VS Code editor settings
+.vscode/
+
+# --- Downloaded Zips ---
+# Ignore any zip files you downloaded
+*.zip
+*.tar.gz
