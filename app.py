@@ -40,18 +40,20 @@ def load_my_model(model_path):
         st.write("Please run 'python task_05.py' first to train and save the model.")
         st.stop()
 
-# --- 4. Flexible Firebase Initialization ---
+# --- 4 Flexible Firebase Initialization (robust to newline issues) ---
 @st.cache_resource
 def init_firebase():
     """
-    Initialize Firebase.
-    Priority:
-      1) st.secrets['FIREBASE_JSON'] (deployed)
-      2) local file at .streamlit/firebase_key.json (local dev)
-    This supports secrets as a JSON string or as a dict, and fixes escaped newlines.
+    Initialize Firebase using:
+      1) st.secrets['FIREBASE_JSON'] (preferred)
+      2) fallback to .streamlit/firebase_key.json (local dev)
+    This version tries to tolerate private_key values pasted with literal newlines
+    by escaping them automatically if needed.
     """
+    import re
+    from json import JSONDecodeError
+
     try:
-        # Try Streamlit secrets first
         fb_secret = None
         try:
             fb_secret = st.secrets.get("FIREBASE_JSON", None)
@@ -59,26 +61,56 @@ def init_firebase():
             fb_secret = None
 
         if fb_secret:
-            # If secret stored as dict (some users paste parsed TOML), accept it
+            # if user provided a dict directly in secrets, accept it
             if isinstance(fb_secret, dict):
                 fb_info = fb_secret
             else:
-                # It's probably a JSON string; handle escaped newlines
                 s = fb_secret
-                # If private_key contains literal "\n", replace with actual newlines
-                if "\\n" in s and '"private_key"' in s:
-                    s = s.replace('\\n', '\n')
-                fb_info = json.loads(s)
+
+                # 1) Try regular strict json parsing
+                try:
+                    fb_info = json.loads(s)
+                except JSONDecodeError:
+                    # 2) Try json.loads with strict=False (allows some control chars)
+                    try:
+                        fb_info = json.loads(s, strict=False)
+                    except Exception:
+                        # 3) Attempt to repair the private_key by escaping newline chars
+                        #    between the BEGIN/END PRIVATE KEY markers.
+                        #    This turns actual newlines into the two-character sequence '\n'
+                        #    which is valid inside JSON string values.
+                        try:
+                            def _escape_private_key_inner(match):
+                                begin = match.group(1)
+                                inner = match.group(2)
+                                end = match.group(3)
+                                # replace actual newlines with literal backslash-n
+                                inner_escaped = inner.replace("\r\n", "\n").replace("\n", "\\n")
+                                return begin + inner_escaped + end
+
+                            # This regex finds the block including BEGIN..END and captures the inner content.
+                            pattern = r'(-----BEGIN PRIVATE KEY-----\n)(.*?)(\n-----END PRIVATE KEY-----)'
+                            s_fixed = re.sub(pattern, _escape_private_key_inner, s, flags=re.S)
+
+                            # Now try to load the repaired string
+                            fb_info = json.loads(s_fixed)
+                        except Exception as e_repair:
+                            st.error("Failed to parse FIREBASE_JSON from secrets (repair attempt failed).")
+                            st.error(f"Repair error: {e_repair}")
+                            st.stop()
+
+            # Build credentials object from dict
             cred = credentials.Certificate(fb_info)
+
         else:
-            # Fall back to a local file
+            # Local fallback (dev)
             local_path = ".streamlit/firebase_key.json"
             if not os.path.exists(local_path):
                 st.error("Firebase key not found. Place your service account at `.streamlit/firebase_key.json` or set FIREBASE_JSON in Streamlit secrets.")
                 st.stop()
             cred = credentials.Certificate(local_path)
 
-        # Initialize app if not already initialized
+        # Initialize Firebase app (only once)
         if not firebase_admin._apps:
             firebase_admin.initialize_app(cred)
 
