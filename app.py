@@ -1,13 +1,17 @@
 # --- Task 5: 🍔 Cheat Day Calorie Tracker 🍕 ---
 #
-# --- THIS IS THE FINAL (MANUAL FIX + UI FIX) VERSION ---
+# --- THIS IS THE FINAL, ROBUST VERSION ---
 #
-# The Problem: `st.secrets` was bugged.
-# The Fix: We are manually loading '.streamlit/firebase_key.json'.
+# This script is smart. It knows how to run in two places:
 #
-# The UI Problem: The app had two different names.
-# The UI Fix: I've updated the `st.title()` to match the
-# "Cheat Day Tracker" theme. Now the app is 100% consistent.
+# 1. ON STREAMLIT CLOUD (Deployed):
+#    It will try to load the key from `st.secrets["firebase_credentials"]`.
+#
+# 2. ON YOUR PC (Local):
+#    If `st.secrets` fails, it will fall back and try to load your
+#    local `.streamlit/firebase_key.json` file.
+#
+# This gives us the best of both worlds.
 
 import streamlit as st
 import tensorflow as tf
@@ -17,7 +21,7 @@ import numpy as np
 from PIL import Image
 import os
 import cv2
-import json # Need this to parse the config
+import json
 import uuid
 
 # --- 1. Import My Database ---
@@ -34,7 +38,6 @@ from firebase_admin import credentials, firestore
 from google.cloud.firestore import Client as FirestoreClient
 
 # --- 3. Setup & Model Loading ---
-
 MODEL_FILE = 'indian_food_model.h5'
 IMG_SIZE = (224, 224)
 
@@ -50,39 +53,46 @@ def load_my_model(model_path):
         st.write("Please run 'python task_05.py' first to train and save the model.")
         st.stop()
 
-# --- 4. NEW: Firebase Initialization (Manual Version) ---
+# --- 4. NEW: Firebase Initialization ("Smart" Version) ---
 @st.cache_resource
 def init_firebase():
     """
-    Initialize Firebase app using our *manual* key file.
+    Initialize Firebase app using Streamlit Secrets (for deployment)
+    or a local key file (for local testing).
     Returns the Firestore database client.
     """
     try:
-        # This is our new, manual path
+        # --- METHOD 1: Try to load from Streamlit Secrets (for deployment) ---
+        creds_str = st.secrets["firebase_credentials"]
+        creds_dict = json.loads(creds_str)
+        creds = credentials.Certificate(creds_dict)
+        print("Firebase initialized successfully from Streamlit Secrets!")
+        
+    except KeyError:
+        # --- METHOD 2: Fall back to local file (for local testing) ---
+        print("Firebase credentials not found in st.secrets. Falling back to local file...")
         KEY_PATH = ".streamlit/firebase_key.json"
         
         if not os.path.exists(KEY_PATH):
             st.error("Firebase Key File Not Found!")
             st.write(f"This app is looking for your secret key at `{KEY_PATH}`.")
-            st.write("Please rename your downloaded JSON key to `firebase_key.json` and place it in the `.streamlit` folder.")
+            st.write("Please create this file (or add to st.secrets) to run the app.")
             st.stop()
-
-        # Use credentials.Certificate() to load the file *directly*
+        
         creds = credentials.Certificate(KEY_PATH)
-        
-        # Initialize the app if it's not already
-        if not firebase_admin._apps:
-            firebase_admin.initialize_app(creds)
-        
-        # Initialize Firestore
-        db = firestore.client()
-        
-        print("Firebase initialized successfully (Manual Method)!")
-        return db
-
+        print("Firebase initialized successfully from local file!")
+    
     except Exception as e:
-        st.error(f"Error initializing Firebase (Manual): {e}")
+        st.error(f"An error occurred during Firebase initialization: {e}")
         st.stop()
+
+    # Initialize the app if it's not already
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(creds)
+    
+    # Initialize Firestore
+    db = firestore.client()
+    return db
 
 # --- 5. Database Helper Functions ---
 # (These are all the same, they just use the 'db' object)
@@ -100,7 +110,7 @@ def get_food_log(db: FirestoreClient):
         food_log = [item.to_dict() for item in log_items]
         # We need to iterate again to get the document ID
         for i, doc in enumerate(log_items):
-            food_log[i]['id'] = doc.id
+             food_log[i]['id'] = doc.id
         return food_log
     except Exception as e:
         st.error(f"Error fetching log: {e}")
@@ -141,14 +151,12 @@ def process_image(image_file):
 
 # --- 7. Initialize App ---
 st.set_page_config(page_title="Cheat Day Tracker", page_icon="🍔", layout="wide")
-
-# --- THIS IS THE FIX: ---
 st.title("🍔 Cheat Day Calorie Tracker 🍕")
-# (It no longer says "Indian Food Classifier")
 
-db = init_firebase() # This now runs our new "manual" function
+db = init_firebase() # This now runs our new "smart" function
 
 # --- 8. Build the App UI (Same as before) ---
+# (No changes needed here, it just uses the 'db' object)
 
 # --- === SIDEBAR === ---
 st.sidebar.title("🔥 Your Cheat Day HQ 🔥")
