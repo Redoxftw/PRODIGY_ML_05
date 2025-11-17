@@ -1,4 +1,5 @@
 # Complete app.py — Streamlit + Firebase (email/password auth) + Firestore per-user logs
+# Final update: improved sidebar delete button (red pill, no-wrap) + tightened columns to avoid wrapping.
 
 import streamlit as st
 import os
@@ -7,7 +8,7 @@ import uuid
 import re
 from json import JSONDecodeError
 
-# ML libs (keep as in your project; if not needed remove)
+# ML libs
 import tensorflow as tf
 from tensorflow import keras
 from keras.applications.mobilenet_v2 import preprocess_input
@@ -290,6 +291,45 @@ def clear_log(db: FirestoreClient):
         item.reference.delete()
 
 # ----------------------------
+# Inject improved CSS for small red delete buttons (no-wrap, pill)
+css = """
+<style>
+/* Style Streamlit buttons labeled exactly "Del" to be red, compact, no-wrap, centered */
+button[aria-label="🗑️"] > div {
+  background-color: #e55353 !important;    /* red background */
+  color: white !important;                 /* white text */
+  border-radius: 8px !important;
+  padding: 0.15rem 0.6rem !important;
+  font-weight: 600 !important;
+  font-size: 0.85rem !important;
+  white-space: nowrap !important;          /* prevent wrapping */
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Make the outer button container compact and remove extra margins */
+button[aria-label="🗑️"] {
+  padding: 0 !important;
+  margin: 0 !important;
+  min-width: 2.6rem !important;
+  height: 2.6rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Slightly reduce focus outline so it looks neat */
+button[aria-label="🗑️"]:focus {
+  outline: 2px solid rgba(229,83,83,0.25) !important;
+  box-shadow: none !important;
+}
+</style>
+"""
+st.markdown(css, unsafe_allow_html=True)
+# ----------------------------
+
+# ----------------------------
 # Sidebar: Calorie goal & show user's log
 # ----------------------------
 if 'calorie_limit' not in st.session_state:
@@ -317,25 +357,34 @@ else:
         calories = item.get('calories', 0)
         unit = item.get('unit', 'unit')
         qty = item.get('quantity', 1)
-        doc_id = item.get('id', uuid.uuid4())
+        # ensure doc_id is a string (safe for Streamlit widget keys)
+        doc_id = str(item.get('id', uuid.uuid4().hex))
 
         subtotal = calories * qty
         total_calories += subtotal
 
         st.sidebar.markdown(f"**{name}**")
-        col1, col2, col3 = st.sidebar.columns([3, 2, 1])
+        # Updated column sizes keep enough space for delete pill and avoid wrapping
+        col1, col2, col3 = st.sidebar.columns([3.2, 0.9, 0.9])
 
         with col1:
-            st.caption(f"{subtotal} kcal")
+            # compact description
+            st.caption(f"{calories} kcal each • {unit}")
 
         with col2:
-            new_q = st.number_input("Qty", min_value=1, value=qty, step=1, key=f"qty_{doc_id}")
+            # compact qty input - collapse label if supported
+            try:
+                new_q = col2.number_input("", min_value=1, value=qty, step=1, key=f"qty_{doc_id}", label_visibility="collapsed")
+            except TypeError:
+                new_q = col2.number_input("", min_value=1, value=qty, step=1, key=f"qty_{doc_id}")
+
             if new_q != qty:
                 update_log_item(db, doc_id, new_q)
                 st.rerun()
 
         with col3:
-            if st.button("🗑️", key=f"del_{doc_id}"):
+            # Delete button: 'Del' label will be styled via CSS above (red pill, no-wrap)
+            if col3.button("🗑️", key=f"del_{doc_id}"):
                 delete_log_item(db, doc_id)
                 st.rerun()
 
@@ -358,7 +407,10 @@ st.header("1. Log Your Food")
 uploaded = st.file_uploader("Upload your cheat meal:", type=["jpg", "jpeg", "png"])
 
 if uploaded:
-    st.image(uploaded, caption="Analyzing...", use_container_width=True)
+    # center the image by placing it in the middle column
+    left, mid, right = st.columns([1, 2, 1])
+    with mid:
+        st.image(uploaded, caption="Analyzing...", use_container_width=False, width=480)
     with st.spinner("Classifying..."):
         processed = process_image(uploaded)
         model = load_my_model(MODEL_FILE)
@@ -374,16 +426,27 @@ if uploaded:
                 st.success(f"Identified: **{friendly}** ({confidence:.2f}%)")
                 st.info(f"Estimated Calories: **{calories} kcal** ({unit})")
 
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    qty = st.number_input("Quantity:", min_value=1, value=1)
-                with col2:
-                    if st.button(f"Log {qty} × {friendly}"):
+                # --- Compact inline qty + Log button (better alignment) ---
+                safe_name = str(class_name).replace(" ", "_")
+                # create a single row with three columns: label | qty input | button
+                col_label, col_input, col_button = st.columns([2, 1, 1])
+
+                with col_label:
+                    st.markdown("**Quantity**", unsafe_allow_html=True)
+
+                with col_input:
+                    try:
+                        qty = st.number_input("", min_value=1, value=1, key=f"qty_input_{safe_name}", label_visibility="collapsed")
+                    except TypeError:
+                        qty = st.number_input("", min_value=1, value=1, key=f"qty_input_{safe_name}")
+
+                with col_button:
+                    if st.button(f"Log {qty} × {friendly}", key=f"log_btn_{safe_name}"):
                         add_log_item(db, {
                             "name": friendly,
                             "calories": calories,
                             "unit": unit,
-                            "quantity": qty
+                            "quantity": int(qty)
                         })
                         st.success("Logged successfully!")
                         st.rerun()
